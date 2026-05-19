@@ -1,0 +1,222 @@
+==========================================================
+         Excel Agent Online - 自定义技能开发规范
+==========================================================
+
+本文件定义了 Excel Agent Online 自定义技能的开发规则。
+请将本文件内容完整复制到AI编程工具（如 Cursor、Copilot、Claude 等），
+在末尾附上你对技能的描述，AI将为你生成符合规范的技能代码。
+
+==========================================================
+                        技能结构
+==========================================================
+
+每个技能是一个文件夹，放置在以下目录之一：
+
+  【推荐】AI技能目录: ai_skills/技能名称/
+  【内置】内置技能:   skill/技能名称/
+
+文件夹内必须包含以下文件：
+
+  1. handler.py  - 技能处理代码（必须）
+  2. skill.txt   - 技能说明文件（必须）
+
+==========================================================
+                     handler.py 规范
+==========================================================
+
+1. 必须包含一个 process 函数，签名如下：
+
+   def process(input_path, output_path):
+       """
+       参数:
+         input_path  - 输入文件路径（.xls / .xlsx / .txt）
+         output_path - 输出文件路径（建议输出为 .xlsx 格式）
+       返回:
+         (output_path, image_paths)
+         - output_path: 生成的输出文件路径
+         - image_paths: 图片路径列表（可为空列表 []）
+       """
+
+2. 函数内部的 import 语句必须放在函数内部（不要放在文件顶部）
+
+3. 必须同时支持三种输入格式：
+   - .xls  （使用 xlrd 读取）
+   - .xlsx （使用 openpyxl 读取）
+   - .txt  （读取文本文件，自动检测编码和分隔符，转为表格数据）
+
+4. txt 文件处理要求：
+   - 尝试多种编码读取：utf-8, gbk, gb2312, gb18030, latin-1
+   - 自动检测分隔符（制表符、逗号、空格、竖线等）
+   - 将文本数据写入 Excel 格式输出
+   - 文本类型的数字应转换为真正的数值类型
+
+5. 图表生成要求：
+   - 使用 matplotlib 生成图表，保存为 PNG 格式
+   - 图片保存路径：os.path.join(os.path.dirname(output_path), '图片名称.png')
+   - 图表应设置中文字体支持：
+     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
+     plt.rcParams['axes.unicode_minus'] = False
+
+6. Excel 内嵌图表（推荐）：
+   - 使用 openpyxl.chart 的 LineChart / BarChart 等在 Excel 中插入图表
+   - 图表位置放在数据行下方
+
+7. 日志使用 logging 模块，不要使用 print()
+
+8. 文件开头格式：
+   import os
+
+   def process(input_path, output_path):
+       import logging
+       from datetime import datetime
+       # ... 处理逻辑
+
+==========================================================
+                     skill.txt 规范
+==========================================================
+
+纯文本文件，内容包含：
+  - 技能名称
+  - 技能描述
+  - 支持的文件格式
+  - 主要功能
+  - 生成时间
+
+示例：
+  技能名称: 电量曲线
+  描述: 从txt数据文件提取电流/电压/电量数据，生成折线图
+  支持格式: .txt, .xls, .xlsx
+  主要功能: 数据提取、折线图生成、Excel内嵌图表
+
+==========================================================
+                     依赖库
+==========================================================
+
+项目已安装的库：
+  - flask, flask-cors （Web框架）
+  - openpyxl （.xlsx 读写）
+  - xlrd （.xls 读取）
+  - matplotlib （图表生成）
+  - requests （HTTP请求）
+
+如需使用其他库，请确保在 requirements.txt 中添加。
+
+==========================================================
+                    输出示例模板
+==========================================================
+
+以下是 handler.py 的标准模板：
+
+---- 以下是模板开始 ----
+
+import os
+
+def process(input_path, output_path):
+    import logging
+    import os
+    from datetime import datetime
+
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    output_dir = os.path.dirname(output_path)
+    os.makedirs(output_dir, exist_ok=True)
+
+    input_ext = os.path.splitext(input_path)[1].lower()
+
+    # ========== 读取输入文件 ==========
+    from openpyxl import Workbook, load_workbook
+
+    if input_ext == '.txt':
+        # TXT文件处理
+        wb = Workbook()
+        ws = wb.active
+        lines = None
+        for enc in ['utf-8', 'gbk', 'gb2312', 'gb18030', 'latin-1']:
+            try:
+                with open(input_path, 'r', encoding=enc) as f:
+                    lines = f.readlines()
+                break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        if lines is None:
+            with open(input_path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+
+        import re
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            parts = re.split(r'\s+', line)
+            ws.append([p.strip() for p in parts])
+
+        # 文本数字转真数字
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str):
+                    val = cell.value.strip()
+                    try:
+                        cell.value = float(val) if '.' in val else int(val)
+                    except ValueError:
+                        pass
+    elif input_ext == '.xls':
+        import xlrd
+        wb_in = xlrd.open_workbook(input_path)
+        ws_in = wb_in.sheet_by_index(0)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = ws_in.name
+        for r in range(ws_in.nrows):
+            ws.append([ws_in.cell(r, c).value for c in range(ws_in.ncols)])
+    else:
+        wb = load_workbook(input_path)
+        ws = wb.active
+
+    # ========== 你的处理逻辑 ==========
+
+    # ========== 保存输出 ==========
+    wb.save(output_path)
+
+    # ========== 生成图表（可选） ==========
+    # import matplotlib
+    # matplotlib.use('Agg')
+    # import matplotlib.pyplot as plt
+    # plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+    # plt.rcParams['axes.unicode_minus'] = False
+    # fig, ax = plt.subplots()
+    # ax.plot(...)
+    # plt.tight_layout()
+    # image_path = os.path.join(output_dir, 'chart.png')
+    # fig.savefig(image_path, dpi=150, bbox_inches='tight')
+    # plt.close(fig)
+
+    return output_path, []
+
+---- 以上是模板结束 ----
+
+==========================================================
+                    如何使用本规范
+==========================================================
+
+方法一：使用 AI 编程工具（推荐）
+  1. 复制本文件的全部内容
+  2. 打开 AI 编程工具（Cursor / Copilot / Claude / ChatGPT 等）
+  3. 粘贴本文件内容
+  4. 在末尾写上你的技能描述，例如：
+     "我需要一个技能：读取txt温湿度数据，按日期分组统计，
+      生成柱状图，输出为Excel。txt文件用空格分列。"
+  5. AI 会生成 handler.py 文件
+  6. 将生成的 handler.py 和一个 skill.txt 放入文件夹
+  7. 将文件夹放入 ai_skills/ 目录即可
+
+方法二：手动创建
+  1. 在 ai_skills/ 下创建文件夹（文件夹名即技能名）
+  2. 手动编写 handler.py（参照上面的模板）
+  3. 创建 skill.txt 描述文件
+  4. 重启服务，新技能会自动出现在技能列表中
+
+放置位置：
+  ai_skills/你的技能名称/handler.py
+  ai_skills/你的技能名称/skill.txt
+
+==========================================================
